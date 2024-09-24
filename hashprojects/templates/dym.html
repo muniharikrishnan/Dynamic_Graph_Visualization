@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Network Graph with Weights</title>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://code.highcharts.com/modules/networkgraph.js"></script>
+    <script src="https://code.highcharts.com/modules/accessibility.js"></script>
+    <style>
+        #container {
+            width: 100%;
+            height: 600px;
+            margin-top: 20px; /* Added margin for better layout */
+        }
+        h1 {
+            text-align: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+            cursor: pointer; /* Change cursor to pointer for clickable rows */
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Dynamic Network Graph Visualization</h1>
+
+    <input type="file" id="fileInput" accept=".csv">
+    <button onclick="loadCSV()">Load CSV</button>
+
+    <div id="container"></div>
+
+    <table id="fileTable">
+        <thead>
+            <tr>
+                <th>File Name</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- File names will be appended here -->
+        </tbody>
+    </table>
+
+    <script>
+        let graphData = [];
+        let currentFile = null; // Store the currently loaded file
+
+        // Function to load and read CSV file
+        function loadCSV() {
+            const input = document.getElementById('fileInput');
+            if (input.files.length > 0) {
+                const file = input.files[0];
+                currentFile = file; // Store the current file
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    const text = e.target.result;
+                    parseCSV(text);
+                    saveCSVToDatabase(file.name, text); // Save CSV data to database
+                };
+
+                addFileNameToTable(file.name); // Add file name to table
+                reader.readAsText(file);
+            }
+        }
+
+        // Function to add file name to the table
+        function addFileNameToTable(fileName) {
+            const tableBody = document.getElementById('fileTable').getElementsByTagName('tbody')[0];
+            const newRow = tableBody.insertRow();
+            const cell = newRow.insertCell(0);
+            cell.textContent = fileName;
+
+            // Add click event to the cell
+            cell.onclick = function() {
+                localStorage.setItem('selectedFile', fileName); // Store file name in local storage
+                alert(`File "${fileName}" stored in local storage!`);
+                loadGraphFromCSV(currentFile); // Load graph from the current file
+            };
+        }
+
+        // Function to save CSV data to the database
+        function saveCSVToDatabase(fileName, fileContent) {
+            fetch('http://localhost:5000/save_csv', { // Updated endpoint to save CSV
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ file_name: fileName, file_content: fileContent })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok: ' + response.statusText);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Success:', data.message); // Log success message
+            })
+            .catch(error => {
+                console.error('Error saving CSV to database:', error);
+            });
+        }
+
+        // Function to load and parse the selected CSV file
+        function loadGraphFromCSV(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                parseCSV(text); // Parse and draw the graph with the new data
+            };
+            reader.readAsText(file);
+        }
+
+        // Function to parse the CSV data and convert it to graph format
+        function parseCSV(data) {
+            const lines = data.trim().split('\n');
+            const headers = lines[0].split(',');
+
+            graphData = []; // Clear previous data
+
+            for (let i = 1; i < lines.length; i++) {
+                const [source, target, weight] = lines[i].split(',');
+
+                graphData.push({
+                    from: source.trim(),
+                    to: target.trim(),
+                    weight: parseFloat(weight) || 1 // Default weight is 1 if not specified
+                });
+            }
+
+            drawGraph(); // Draw the graph with the parsed data
+        }
+
+        // Function to draw the network graph
+        function drawGraph() {
+            Highcharts.chart('container', {
+                chart: {
+                    type: 'networkgraph',
+                    plotBorderWidth: 5
+                },
+                title: {
+                    text: 'Dynamic Network Graph with Weights'
+                },
+                plotOptions: {
+                    networkgraph: {
+                        keys: ['from', 'to'],
+                        layoutAlgorithm: {
+                            enableSimulation: true
+                        },
+                        link: {
+                            width: function (point) {
+                                return point.options.weight; // Link width based on weight
+                            },
+                            marker: {
+                                enabled: true,
+                                symbol: 'triangle',
+                                radius: 6,
+                                lineWidth: 1,
+                                fillColor: 'green' // Link marker color
+                            }
+                        }
+                    }
+                },
+                series: [{
+                    data: graphData,
+                    nodes: graphData.map(link => ({ id: link.from, color: 'green' })).concat(graphData.map(link => ({ id: link.to, color: 'green' }))),
+
+                    dataLabels: {
+                        enabled: true,
+                        textPath: {
+                            enabled: true
+                        },
+                        linkFormat: '',
+                        format: '{point.id}', // Display node name
+                        style: {
+                            color: 'black',
+                            fontWeight: 'bold'
+                        }
+                    },
+                    link: {
+                        width: 1
+                    }
+                }]
+            });
+        }
+
+        // Customizing the link path
+        (function(H) {
+            H.wrap(H.seriesTypes.networkgraph.prototype.pointClass.prototype, 'getLinkPath', function(p) {
+                var left = this.toNode,
+                    right = this.fromNode;
+
+                var angle = Math.atan((left.plotX - right.plotX) / (left.plotY - right.plotY));
+
+                if (angle) {
+                    let path = ['M', left.plotX, left.plotY, right.plotX, right.plotY],
+                        lastPoint = left,
+                        nextLastPoint = right,
+                        pointRadius = 45,
+                        arrowLength = 20,
+                        arrowWidth = 10;
+
+                    if (left.plotY < right.plotY) {
+                        path.push(
+                            nextLastPoint.plotX - pointRadius * Math.sin(angle),
+                            nextLastPoint.plotY - pointRadius * Math.cos(angle),
+                        );
+                        path.push(
+                            nextLastPoint.plotX - pointRadius * Math.sin(angle) - arrowLength * Math.sin(angle) - arrowWidth * Math.cos(angle),
+                            nextLastPoint.plotY - pointRadius * Math.cos(angle) - arrowLength * Math.cos(angle) + arrowWidth * Math.sin(angle),
+                        );
+
+                        path.push(
+                            nextLastPoint.plotX - pointRadius * Math.sin(angle),
+                            nextLastPoint.plotY - pointRadius * Math.cos(angle),
+                        );
+                        path.push(
+                            nextLastPoint.plotX - pointRadius * Math.sin(angle) - arrowLength * Math.sin(angle) + arrowWidth * Math.cos(angle),
+                            nextLastPoint.plotY - pointRadius * Math.cos(angle) - arrowLength * Math.cos(angle) - arrowWidth * Math.sin(angle),
+                        );
+
+                    } else {
+                        path.push(
+                            nextLastPoint.plotX + pointRadius * Math.sin(angle),
+                            nextLastPoint.plotY + pointRadius * Math.cos(angle),
+                        );
+                        path.push(
+                            nextLastPoint.plotX + pointRadius * Math.sin(angle) + arrowLength * Math.sin(angle) - arrowWidth * Math.cos(angle),
+                            nextLastPoint.plotY + pointRadius * Math.cos(angle) + arrowLength * Math.cos(angle) + arrowWidth * Math.sin(angle),
+                        );
+                        path.push(
+                            nextLastPoint.plotX + pointRadius * Math.sin(angle),
+                            nextLastPoint.plotY + pointRadius * Math.cos(angle),
+                        );
+                        path.push(
+                            nextLastPoint.plotX + pointRadius * Math.sin(angle) + arrowLength * Math.sin(angle) + arrowWidth * Math.cos(angle),
+                            nextLastPoint.plotY + pointRadius * Math.cos(angle) + arrowLength * Math.cos(angle) - arrowWidth * Math.sin(angle),
+                        );
+
+                    }
+
+                    return path;
+                }
+                return [
+                    ['M', right.plotX || 0, right.plotY || 0],
+                    ['L', left.plotX || 0, left.plotY || 0],
+                ];
+            });
+        }(Highcharts));
+    </script>
+</body>
+</html>
